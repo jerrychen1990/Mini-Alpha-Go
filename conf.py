@@ -8,4 +8,8 @@ WHITE = 'W'
 BLANK = '_'
 DRAW = 'draw'
 
-
+PIECE_DICT = {
+    BLACK: '01',
+    WHITE: '10',
+    BLANK: '00'
+}

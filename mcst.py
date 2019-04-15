@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 # @Time    : 4/8/19 3:43 PM
 # @Author  : xiaowa
-from game_base import do_expand, get_valid_action_list, transform, get_blank_board, state2key
-from tictac import TicTac
+from game import do_expand, get_valid_action_list, transform, get_blank_board, state2key, TicTac
 from conf import DRAW
-from strategy_base import random_strategy
+from strategy import random_strategy
 from conf import BLANK, BLACK
 import math
-from log_utils import logger
+from log_utils import get_log, default_logger
 import codecs
+from decorate import cal_time
 import _pickle as pickle
 
 
@@ -76,7 +76,7 @@ class Node:
                 wr=self.get_win_score(), lr=self.get_loss_score(),
                 blv=self.get_believe_score(), sel=self.get_select_score())
 
-    def get_next(self, strategy='explore'):
+    def get_next(self, strategy='explore', logger=default_logger):
         parent = self.visit
         score_list = [(action, n.get_explore_score(parent), n.get_select_score(), n.get_score_detail_str(),
                        n.get_rare_score(parent)) for
@@ -112,40 +112,49 @@ class Node:
 
 
 class MCST:
-    def __init__(self, action_func, transform_func, judge_func, simulation_func):
+    def __init__(self, action_func, transform_func, judge_func, simulation_func, name='mcst'):
+        self.name = name
         self.node_dict = {}
         self.action_func = action_func
         self.transform_func = transform_func
         self.judge_func = judge_func
         self.simulation_func = simulation_func
+        self.logger = get_log("mcst-log", file_path="log/{}.log".format(self.name))
+        self.recorder = dict()
 
     def find_state(self, board, piece):
         node = search_add(self.node_dict, board, piece)
         return node
 
+    def __getstate__(self):
+        d = dict(self.__dict__)
+        del d['logger']
+        return d
+
+    # @cal_time(self.recorder, )
     def selection(self, node):
         record = []
-        logger.debug("selection start...")
+        self.logger.debug("selection start...")
         while node.is_expand:
             record.append(node)
             next_action, node = node.get_next()
         node.expand(self.node_dict, self.action_func, self.transform_func)
         record.append(node)
-        logger.debug("selection result:\n{}".format(node))
+        self.logger.debug("selection result:\n{}".format(node))
         return node, record
 
     def simulation(self, node):
-        logger.debug("simulation start")
+        self.logger.debug("simulation start")
         rs = self.judge_func(node.board)
         while rs is None:
             action_list = self.action_func(node.board, node.piece)
             if not action_list:
                 return DRAW
-            action = self.simulation_func(action_list)
+            action = self.simulation_func(node.board, node.piece, action_list)
             next_board, next_piece = self.transform_func(node.board, node.piece, action)
             node = self.find_state(next_board, next_piece)
             rs = self.judge_func(node.board)
-        logger.debug("simulation result:{}".format(rs))
+        self.logger.debug("simulation result:{}".format(rs))
         return rs
 
     @staticmethod
@@ -154,8 +163,10 @@ class MCST:
             node.update(rs)
 
     def explode_search(self, node):
-        node, record = self.selection(node)
-        rs = self.simulation(node)
+        selection_func = cal_time(self.recorder, "selection")(self.selection)
+        node, record = selection_func(node)
+        simulation_func = cal_time(self.recorder, "simulation")(self.simulation)
+        rs = simulation_func(node)
         MCST.back_propagation(record, rs)
 
     def store(self, name):
@@ -176,17 +187,14 @@ def load_mcst(name):
     path = get_path(name)
     with codecs.open(path, 'rb') as file:
         mcst = pickle.load(file)
+        logger = get_log("mcst-log", file_path="log/{}.log".format(name))
+        mcst.logger = logger
         return mcst
 
 
 if __name__ == '__main__':
     the_board = get_blank_board(3)
-    the_root = Node(the_board, BLACK)
     the_mcst = MCST(TicTac.get_valid_action_list, transform, TicTac.judge, random_strategy)
-    the_mcst.explode_search(the_root)
-    the_mcst.explode_search(the_root)
-    the_mcst.explode_search(the_root)
-
     #
     #
     # print(mcst.selection(mcst.root))
